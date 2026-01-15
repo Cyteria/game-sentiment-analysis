@@ -1,0 +1,11 @@
+# 忽略虛擬環境資料夾
+venv/
+env/
+.env
+
+# 忽略 Python 快取檔
+__pycache__/
+*.pyc
+
+# 忽略作業系統產生的垃圾檔
+.DS_Store

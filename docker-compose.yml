@@ -1,0 +1,40 @@
+# services:
+#   # 1. MySQL: 存股價與營收
+#   mysql-db:
+#     image: mysql:8.0
+#     container_name: tw-stock-mysql
+#     restart: always
+#     environment:
+#       MYSQL_ROOT_PASSWORD: password123
+#       MYSQL_DATABASE: stock_db
+#     ports:
+#       - "3306:3306"
+
+#   # 2. MongoDB: 存新聞全文
+#   mongo-db:
+#     image: mongo:latest
+#     container_name: tw-stock-mongo
+#     ports:
+#       - "27017:27017"
+
+#   # 3. Zookeeper: Kafka 的協調者
+#   zookeeper:
+#     image: confluentinc/cp-zookeeper:7.5.0
+#     container_name: tw-stock-zookeeper
+#     environment:
+#       ZOOKEEPER_CLIENT_PORT: 2181
+#       ZOOKEEPER_TICK_TIME: 2000
+
+#   # 4. Kafka: 即時數據流
+#   kafka:
+#     image: confluentinc/cp-kafka:7.5.0
+#     container_name: tw-stock-kafka
+#     depends_on:
+#       - zookeeper
+#     ports:
+#       - "9092:9092"
+#     environment:
+#       KAFKA_BROKER_ID: 1
+#       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+#       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+#       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1

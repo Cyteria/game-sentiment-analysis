@@ -1,6 +1,11 @@
 import streamlit as st
 import pymysql
 import pandas as pd
+import os
+from dotenv import load_dotenv # 引入讀取套件
+
+load_dotenv()
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # ==========================================
 # 1. 資料庫連線設定
@@ -8,7 +13,7 @@ import pandas as pd
 DB_SETTINGS = {
     "host": "localhost",
     "user": "root",
-    "password": "password",
+    "password": DB_PASSWORD,
     "db": "sentiment_monitor",
     "charset": "utf8mb4"
 }

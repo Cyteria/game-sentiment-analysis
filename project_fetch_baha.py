@@ -17,6 +17,12 @@ import random
 # 把資料丟到資料庫
 import pymysql
 
+import os
+from dotenv import load_dotenv # 引入讀取套件
+
+load_dotenv()
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+
 # ==========================================
 # 區塊 2：設定參數
 # ==========================================
@@ -36,7 +42,7 @@ BLOCK_KEYWORDS = ["原神版", "兌換碼", "刪除", "序號", "公告"]
 DB_SETTINGS = {
     "host": "localhost",
     "user": "root", 
-    "password": "password",
+    "password": DB_PASSWORD,
     "db": "sentiment_monitor",
     "charset": "utf8mb4",
     "cursorclass": pymysql.cursors.DictCursor

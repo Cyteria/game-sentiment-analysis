@@ -2,18 +2,25 @@ import pymysql
 import time
 import os
 import re
+from dotenv import load_dotenv # 引入讀取套件
 from groq import Groq  # 引入 Groq 套件
+
+load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # ==========================================
 # 1. 設定區
 # ==========================================
-# 填入你的 Groq API Key
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
+
+# 檢查
+if not GROQ_API_KEY or not DB_PASSWORD:
+    raise ValueError("❌ 錯誤：找不到環境變數！請檢查 .env 檔案或是系統設定。")
 
 DB_SETTINGS = {
     "host": "localhost",
     "user": "root",
-    "password": os.getenv("DB_PASSWORD", "password"),
+    "password": DB_PASSWORD,
     "db": "sentiment_monitor",
     "charset": "utf8mb4",
     "cursorclass": pymysql.cursors.DictCursor

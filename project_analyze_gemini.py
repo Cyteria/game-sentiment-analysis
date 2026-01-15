@@ -2,19 +2,23 @@ import pymysql
 import time
 import os
 import re
+from dotenv import load_dotenv # 引入讀取套件
 from google import genai
 from google.genai import types
+
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # ==========================================
 # 1. 設定區 (Config)
 # ==========================================
-API_KEY = os.getenv("GOOGLE_API_KEY", "AIzaSyBcgO5T36isJ-mBvGmDhuCtXZyHOLtUHqk")
 
 # 資料庫連線設定
 DB_SETTINGS = {
     "host": "localhost",
     "user": "root",
-    "password": os.getenv("DB_PASSWORD", "password"),
+    "password": DB_PASSWORD,
     "db": "sentiment_monitor",
     "charset": "utf8mb4",
     "cursorclass": pymysql.cursors.DictCursor
@@ -23,7 +27,7 @@ DB_SETTINGS = {
 MODEL_NAME = "gemini-exp-1206"
 
 # 初始化 Gemini 客戶端
-client = genai.Client(api_key=API_KEY)
+client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # ==========================================
 # 2. 核心功能：問 AI 給分數

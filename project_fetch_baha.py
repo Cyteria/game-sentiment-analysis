@@ -201,7 +201,7 @@ def scrape_single_page(page_number):
 
 if __name__ == "__main__":
   start_page = 1
-  end_page = 3
+  end_page = 100
   print(f"開始執行爬蟲，預計從第 {start_page} 頁 爬到 第 {end_page - 1} 頁...")
   for page in range(start_page, end_page):
     scrape_single_page(page)

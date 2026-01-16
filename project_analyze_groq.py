@@ -1,17 +1,19 @@
 import pymysql
 import time
 import os
+import json
 import re
 from dotenv import load_dotenv # 引入讀取套件
 from groq import Groq  # 引入 Groq 套件
-
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
+from utils import clean_text  # 引入清洗工具
 
 # ==========================================
 # 1. 設定區
 # ==========================================
+
+load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # 檢查
 if not GROQ_API_KEY or not DB_PASSWORD:
@@ -26,73 +28,82 @@ DB_SETTINGS = {
     "cursorclass": pymysql.cursors.DictCursor
 }
 
-# 選擇模型：Llama 3.3 70B (準確度高) 或 llama3-8b-8192 (速度極快)
+# 使用 Llama 3 70B，它的邏輯能力最強，適合做分類 
 MODEL_NAME = "llama-3.3-70b-versatile"
 
 # 初始化 Groq 客戶端
 client = Groq(api_key=GROQ_API_KEY)
 
 # ==========================================
-# 2. 核心功能：呼叫 Groq (Llama 3)
+# 2. 核心：Prompt 工程 (定義八大維度)
 # ==========================================
 def ask_groq_sentiment(text):
     prompt = f"""
-    你是一個專業的遊戲輿論分析師。請分析以下這則關於《原神》的玩家留言。
-    
-    任務：判斷情緒並給予 0.0 (負面) 到 1.0 (正面) 的分數。
-    
-    標準：
-    - 0.0~0.2: 憤怒、退坑、謾罵 (如: 垃圾遊戲、策劃腦癱)
-    - 0.3~0.4: 抱怨、失望 (如: 太非了、無聊)
-    - 0.5: 中立
-    - 0.6~0.8: 正面
-    - 0.9~1.0: 極度推薦
-    
-    【重要】：你只需要回傳一個數字（例如 0.1 或 0.9），不要有任何解釋、不要標點符號、不要寫 "分數："。
-    
+    你是一個專業的遊戲營運分析師。請分析這則玩家留言。
+
+    【分析目標】：
+    1. 判斷該留言的情緒分數 (0.0~1.0)。
+    2. 判斷該留言提到了哪些「關注維度」，並提取關鍵字。
+
+    【維度定義】：
+    - 機率 (機率, 保底, 非酋, 歐皇)
+    - 金流 (課金, 禮包, CP值)
+    - 官方 (營運, 福利, 外掛, 炎上)
+    - 社交 (公會, 好友, 討論區)
+    - 連線 (登入, 爆Ping, 跨平台)
+    - 更新 (劇情, 玩法, 活動, 地圖, 優化, Bug)
+    - 角色 (強度, 操作, 立繪, 聲優)
+    - 畫面 (畫質, 特效, 流暢度)
+
+    【輸出格式】：
+    請「嚴格」回傳以下 JSON 格式，不要包含 Markdown (```json) 或其他廢話：
+    {{
+        "score": 0.1,
+        "topics": {{
+            "更新": ["劇情無聊", "活動太肝"],
+            "角色": ["鍾離變強"]
+        }}
+    }}
+    (注意：如果該維度沒提到，就不要列在 topics 裡)
+
     留言內容：
     {text}
     """
-    
+
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": "你是一個只會輸出數字的情緒分析機器人。"},
+                {"role": "system", "content": "你是一個只會輸出 JSON 的分析 API。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0, # 設為 0 讓結果最穩定
-            max_tokens=10  # 我們只需要一個數字，不用浪費 token
+            temperature=0,           # 溫度設為 0，讓格式最穩定
+            response_format={"type": "json_object"} # 【關鍵】強制 Groq 回傳 JSON 模式
         )
         
-        # 取得回應文字
         result_text = completion.choices[0].message.content.strip()
         
-        # 用正規表示法抓數字 (雙重保險，怕它回傳 "分數是 0.5")
-        match = re.search(r"(\d+(\.\d+)?)", result_text)
-        if match:
-            return float(match.group(1))
-        else:
-            print(f"  ⚠️ 無法解析回應: {result_text}")
-            return 0.5
-            
+        # 解析 JSON
+        data = json.loads(result_text)
+        return data
+
     except Exception as e:
-        # 如果遇到 429 (Rate Limit)，Groq 通常會告訴你要等多久
-        print(f"  ⚠️ Groq 呼叫失敗: {e}")
+        print(f"  ⚠️ 分析失敗: {e}")
         return None
 
 # ==========================================
 # 3. 主流程
 # ==========================================
 def main():
-    print(f"🚀 開始執行 Groq 分析 (Model: {MODEL_NAME})...")
+    print(f"🚀 開始執行結構化輿情分析 (Model: {MODEL_NAME})...")
     connection = pymysql.connect(**DB_SETTINGS)
     
     try:
         with connection.cursor() as cursor:
-            # 抓取未分析的文章
-            sql_select = "SELECT id, content, title FROM bahamut_posts WHERE sentiment_score IS NULL"
-            cursor.execute(sql_select)
+            # 這裡改成：抓取 analysis_result 是 NULL 的文章 (代表還沒做過新版分析)
+            # 如果你的資料庫還沒加這個欄位，記得先去 GCP 加！
+            sql = "SELECT id, content, title FROM bahamut_posts WHERE analysis_result IS NULL"
+            cursor.execute(sql)
             posts = cursor.fetchall()
             
             total = len(posts)
@@ -101,37 +112,51 @@ def main():
             updates = []
             
             for i, post in enumerate(posts):
-                # 截斷內容 (Groq 處理長文很快，但為了省資源還是切一下)
-                content = post['content'][:800]
-                print(f"[{i+1}/{total}] 分析: {post['title'][:10]}...", end=" ")
+                # 1. 清洗資料
+                clean_content = clean_text(post['content'])
                 
-                score = ask_groq_sentiment(content)
-                
-                if score is not None:
-                    print(f"➔ ⚡ {score}")
-                    updates.append((score, post['id']))
-                else:
-                    print(f"➔ ❌ 失敗")
+                # 截斷過長文章 (Llama 3 context 很長，可以給多一點，給 2000 字)
+                if len(clean_content) > 2000:
+                    clean_content = clean_content[:2000]
 
-                # 存檔機制 (每 10 筆存一次)
-                if len(updates) >= 10:
-                    sql_update = "UPDATE bahamut_posts SET sentiment_score = %s WHERE id = %s"
+                print(f"[{i+1}/{total}] {post['title'][:10]}...", end=" ")
+                
+                # 2. 呼叫 AI
+                result = ask_groq_analysis(clean_content)
+                
+                if result:
+                    # 取得分數與詳細資料
+                    score = result.get('score', 0.5)
+                    topics = result.get('topics', {})
+                    
+                    # 把 topics 轉成 JSON 字串存入資料庫
+                    json_str = json.dumps(topics, ensure_ascii=False)
+                    
+                    print(f"➔ 分數:{score} | 維度:{list(topics.keys())}")
+                    
+                    # 準備更新：同時更新 sentiment_score 和 analysis_result
+                    updates.append((score, json_str, post['id']))
+                else:
+                    print("➔ ❌")
+
+                # 3. 批次存檔
+                if len(updates) >= 5:
+                    # 更新兩個欄位：sentiment_score (供舊功能用) 和 analysis_result (新功能用)
+                    sql_update = "UPDATE bahamut_posts SET sentiment_score = %s, analysis_result = %s WHERE id = %s"
                     cursor.executemany(sql_update, updates)
                     connection.commit()
                     updates = []
-                    print("  💾 (已存檔)")
+                    print("  💾 已存檔")
+                
+                time.sleep(1) # 稍微休息
 
-                # Groq 速度極快，每分鐘允許 30 次請求 (免費版)
-                # 我們休息 2 秒就很安全了 (比 Gemini 快很多)
-                time.sleep(2)
-
-            # 最後存檔
+            # 存剩下的
             if updates:
-                sql_update = "UPDATE bahamut_posts SET sentiment_score = %s WHERE id = %s"
+                sql_update = "UPDATE bahamut_posts SET sentiment_score = %s, analysis_result = %s WHERE id = %s"
                 cursor.executemany(sql_update, updates)
                 connection.commit()
                 print("✅ 全部完成！")
-            
+
     finally:
         connection.close()
 

@@ -1,3 +1,5 @@
+# python3 -m streamlit run project_dashboard.py --server.port 8501 --server.address 0.0.0.0
+
 import streamlit as st
 import pymysql
 import pandas as pd
@@ -11,7 +13,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 # 1. 資料庫連線設定
 # ==========================================
 DB_SETTINGS = {
-    "host": "localhost",
+    "host": os.getenv("DB_HOST", "localhost"),
     "user": "root",
     "password": DB_PASSWORD,
     "db": "sentiment_monitor",
@@ -34,7 +36,7 @@ def load_data():
 # ==========================================
 
 # 設定網頁標題
-st.title("📊 原神版 輿情監控戰情室")
+st.title("📊 原神版 & 鳴潮版 輿情監控戰情室")
 st.write("即時分析巴哈姆特論壇玩家情緒")
 
 # 載入資料

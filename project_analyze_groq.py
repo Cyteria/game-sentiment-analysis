@@ -19,14 +19,34 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 if not GROQ_API_KEY or not DB_PASSWORD:
     raise ValueError("❌ 錯誤：找不到環境變數！請檢查 .env 檔案或是系統設定。")
 
-DB_SETTINGS = {
-    "host": os.getenv("DB_HOST", "localhost"),
-    "user": "root",
+# 檢查是否在雲端環境 Google Cloud Run 會自動注入 K_SERVICE 這個環境變數，本機沒有
+IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None
+
+if IS_CLOUD_RUN:
+    # --- 雲端環境 (Cloud Run) ---
+    # 使用 Unix Socket 連線 (這是最快且最安全的方式)
+    # 注意：這裡不需要 port
+    db_config = {
+        "unix_socket": "/cloudsql/games-sentiment-analysis:asia-east1:game-sentiment-db"
+    }
+else:
+    # --- 本機環境 (Local) ---
+    # 使用 TCP 連線 (搭配您開的 Cloud SQL Proxy)
+    db_config = {
+        "host": "localhost",
+    }
+
+# 共用設定
+common_settings = {
+    "user": "root", 
     "password": DB_PASSWORD,
     "db": "sentiment_monitor",
     "charset": "utf8mb4",
     "cursorclass": pymysql.cursors.DictCursor
 }
+
+# 合併設定
+DB_SETTINGS = {**common_settings, **db_config}
 
 # 設定兩個模型
 PRIMARY_MODEL = "llama-3.3-70b-versatile"  # 主力 

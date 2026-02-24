@@ -11,12 +11,14 @@ import re
 from dotenv import load_dotenv
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-# 環境變數
+# ==========================================
+# 1. 環境設定區
+# ==========================================
 load_dotenv()
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None
 
-# 資料庫設定
+# 資料庫連線設定
 db_config = {
     "user": "root",
     "password": DB_PASSWORD,
@@ -41,15 +43,16 @@ TARGET_BOARDS = [
     {"name": "鳴潮", "bsn": "74934"}
 ]
 
-BLOCK_KEYWORDS = ["版規", "置頂", "公告", "刪除", "兌換", "邀請碼", "序號", "好友", "網頁活動", "互助", "健檢", "隊伍配置", "大佬集中串", "贈送"]
+BLOCK_KEYWORDS = ["版規", "置頂", "公告", "刪除", "兌換", "邀請碼", "序號", "好友", "網頁活動", "互助", "健檢", "隊伍配置", "大佬集中串", "贈送", "祖傳聖遺物", "新手須知"]
 
-# =================設定區=================
-MAX_LIST_PAGES = 20   # 列表頁要抓幾頁
-DAYS_LIMIT = 180     # 設定半年 (180天) 為期限
-# =======================================
+MAX_LIST_PAGES = 20   # 測試用 1 頁，正式跑可改回 10 或 20
+DAYS_LIMIT = 180     # 只抓半年內的文章
+
+# ==========================================
+# 2. 工具函式
+# ==========================================
 
 def safe_int(value):
-    """安全轉換整數，遇到非數字回傳 0"""
     try:
         if not value: return 0
         cleaned = str(value).strip()
@@ -59,75 +62,68 @@ def safe_int(value):
         return 0
 
 def clean_text_content(text):
-    """
-    【全方位清洗函式】
-    """
     if not text: return ""
-    
-    # 1. 移除網址 (含標準與缺損)
     text = re.sub(r'(?:https?://|://|www\.)[a-zA-Z0-9\.\-\/\?\&\=\_\%\+\#\~]+', '', text)
-    
-    # 2. 移除社群 ID (@xxx)
     text = re.sub(r'@[\w]+', '', text)
-    
-    # 3. 【新增】移除樓層引用標籤 (如 #B2:3789633#)
-    # 規則：#B + 數字 + : + 數字 + #
     text = re.sub(r'#B\d+:\d+#', '', text)
-    
-    # 4. 縮減空白
     text = re.sub(r'[ \t]+', ' ', text)
-    
     return text.strip()
 
 def save_to_db(data):
     """
-    寫入資料庫
+    寫入資料庫 (含內容比對與增量更新邏輯)
     """
     connection = None
     try:
         connection = pymysql.connect(**db_config)
         with connection.cursor() as cursor:
+            # 🌟【核心修改】SQL Upsert 邏輯優化
+            # 1. 如果 uuid 不存在 -> 執行 INSERT (新文章)
+            # 2. 如果 uuid 存在 -> 執行 UPDATE (舊文章)
+            # 3. scraped_at 更新邏輯：只有當「內容 (content) 變更」時，才更新 scraped_at
+            
             sql = """
-            INSERT INTO bahamut_posts 
-            (uuid, bsn, sna, board_name, title, content, post_url, 
-             page_num, content_pages, total_content_pages, 
-             created_at, scraped_at, gp_count, bp_count)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO bahamut_posts (
+                uuid, bsn, sna, board_name, title, content, post_url, 
+                page_num, content_pages, total_content_pages, 
+                created_at, scraped_at, gp_count, bp_count
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, 
+                %s, %s, %s, 
+                %s, %s, %s, %s
+            )
             ON DUPLICATE KEY UPDATE 
                 title = VALUES(title),
-                content = VALUES(content),
                 gp_count = VALUES(gp_count),
                 bp_count = VALUES(bp_count),
-                page_num = VALUES(page_num),
-                content_pages = VALUES(content_pages),
                 total_content_pages = VALUES(total_content_pages),
-                scraped_at = VALUES(scraped_at);
+                
+                -- 智慧比對：若新抓到的 content 與資料庫不同，更新爬取時間；否則維持原時間
+                scraped_at = CASE 
+                    WHEN content != VALUES(content) THEN VALUES(scraped_at)
+                    ELSE scraped_at 
+                END,
+
+                -- 最後才更新 content (必須放在比對之後)
+                content = VALUES(content);
             """
             
             cursor.execute(sql, (
-                data['uuid'],
-                data['bsn'],
-                data['sna'],
-                data['board_name'],
-                data['title'],
-                data['content'],
-                data['post_url'],
-                data['page_num'],
-                data['content_pages'],
-                data['total_content_pages'],
-                data['created_at'],
-                data['scraped_at'],
-                data['gp_count'],
-                data['bp_count']
+                data['uuid'], data['bsn'], data['sna'], data['board_name'], 
+                data['title'], data['content'], data['post_url'], 
+                data['page_num'], data['content_pages'], data['total_content_pages'], 
+                data['created_at'], data['scraped_at'], data['gp_count'], data['bp_count']
             ))
-            
         connection.commit()
-
     except Exception as e:
         print(f"    ❌ DB寫入失敗: {e}")
     finally:
         if connection and connection.open:
             connection.close()
+
+# ==========================================
+# 3. 核心爬蟲邏輯
+# ==========================================
 
 def crawl_article_pages(base_meta, list_page_num):
     parsed = urlparse(base_meta['url'])
@@ -136,9 +132,11 @@ def crawl_article_pages(base_meta, list_page_num):
     current_floor_page = 1
     total_content_pages_val = 1 
     
+    # 宣告變數來記住這篇文章的發文時間
+    thread_created_at = None
+
     while current_floor_page <= total_content_pages_val:
-        
-        print(f"    👉 正在抓取內文第 {current_floor_page} 頁 (共 {total_content_pages_val} 頁)...", end='', flush=True)
+        print(f"    👉 正在抓取內文第 {current_floor_page} 頁...", end='', flush=True)
 
         query_params['page'] = [current_floor_page]
         new_query = urlencode(query_params, doseq=True)
@@ -148,77 +146,59 @@ def crawl_article_pages(base_meta, list_page_num):
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 response = requests.get(current_url, headers=HEADERS, cookies=COOKIES, timeout=10)
-                
                 if response.status_code != 200:
-                    print(f" [狀態碼 {response.status_code}，重試中 ({attempt}/{MAX_RETRIES})]")
                     time.sleep(2)
                     continue
 
                 soup = BeautifulSoup(response.text, 'html.parser')
 
-                # --- 1. 日期檢查 (僅第1頁) ---
-                created_at_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                # --- 日期處理 ---
                 if current_floor_page == 1:
                     first_section = soup.select_one('section.c-section')
                     if first_section:
                         mtime_tag = first_section.select_one('.tippy-post-info')
                         if mtime_tag: 
-                            created_at_str = mtime_tag.get('data-mtime')
-                            try:
-                                post_date = datetime.datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
-                                half_year_ago = datetime.datetime.now() - timedelta(days=DAYS_LIMIT)
-                                if post_date < half_year_ago:
-                                    print(f" 👋 文章過期 ({created_at_str})，跳過不抓。")
-                                    return 
-                            except:
-                                pass
+                            thread_created_at = mtime_tag.get('data-mtime')
+                
+                final_created_at = thread_created_at if thread_created_at else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                # --- 2. 更新總頁數 ---
+                # 檢查文章是否過期 (只在第1頁檢查)
+                if current_floor_page == 1 and thread_created_at:
+                    try:
+                        post_date = datetime.datetime.strptime(thread_created_at, '%Y-%m-%d %H:%M:%S')
+                        if post_date < datetime.datetime.now() - timedelta(days=DAYS_LIMIT):
+                            print(f" 👋 文章過期 ({thread_created_at})，跳過。")
+                            return 
+                    except:
+                        pass
+
+                # --- 總頁數更新 ---
                 pagination_links = soup.select('.BH-pagebtnA a')
                 if pagination_links:
                     page_numbers = []
                     for link in pagination_links:
-                        href = link.get('href', '')
-                        if 'B.php' in href: continue
                         val = safe_int(link.text)
-                        if val == 0 and 'page=' in href:
-                            try:
-                                parsed_qs = parse_qs(urlparse(href).query)
-                                val = int(parsed_qs.get('page', [0])[0])
-                            except:
-                                val = 0
                         if val > 0: page_numbers.append(val)
                     if page_numbers:
                         total_content_pages_val = max(page_numbers)
 
-                # --- 3. 抓取內文 ---
-                # ==========================================
-                # 【修改功能】修改 CSS 選擇器，避開 HOT 標籤並精準抓取留言內容
-                # ==========================================
+                # --- 內文抓取 ---
                 all_text_blocks = soup.select('.c-article__content, .reply-content__article .comment_content')
-                
                 content_list = []
                 for block in all_text_blocks:
-                    # 移除名片檔
                     for gamercard in block.select('.article_gamercard'):
                         gamercard.decompose()
-
-                    text = block.text.strip()
-                    if text:
-                        content_list.append(text)
+                    content_list.append(block.text.strip())
                 
                 full_content = "\n\n".join(content_list)
                 full_content = clean_text_content(full_content)
 
-                # 檢查內文是否為空
-                if not full_content:
-                    print(" [⚠️ 內容為空，跳過儲存]")
-                    time.sleep(1)
+                if len(full_content) < 10:
+                    print(f" [⚠️ 內容過短，跳過]")
                     break
 
-                # 抓取 GP/BP (僅第1頁)
-                gp_count = 0
-                bp_count = 0
+                # --- 數值抓取 ---
+                gp_count, bp_count = 0, 0
                 if current_floor_page == 1:
                     first_section = soup.select_one('section.c-section')
                     if first_section:
@@ -226,9 +206,13 @@ def crawl_article_pages(base_meta, list_page_num):
                         bp_tag = first_section.select_one('.bp a.count')
                         if gp_tag: gp_count = safe_int(gp_tag.text)
                         if bp_tag: bp_count = safe_int(bp_tag.text)
-                
+
+                # 固定 UUID 生成邏輯 (BSN + SNA + 頁數)
+                unique_key_str = f"{base_meta['bsn']}_{base_meta['sna']}_{current_floor_page}"
+                fixed_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, unique_key_str))
+
                 post_data = {
-                    "uuid": str(uuid.uuid4()),
+                    "uuid": fixed_uuid,
                     "bsn": base_meta['bsn'],
                     "sna": base_meta['sna'],
                     "board_name": base_meta['board_name'],
@@ -238,7 +222,7 @@ def crawl_article_pages(base_meta, list_page_num):
                     "page_num": list_page_num,
                     "content_pages": current_floor_page,
                     "total_content_pages": total_content_pages_val,
-                    "created_at": created_at_str,
+                    "created_at": final_created_at,
                     "scraped_at": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     "gp_count": gp_count,
                     "bp_count": bp_count
@@ -246,14 +230,12 @@ def crawl_article_pages(base_meta, list_page_num):
 
                 save_to_db(post_data)
                 print(" [完成]")
-                time.sleep(random.uniform(0.8, 1.5))
+                time.sleep(random.uniform(1, 2))
                 break 
 
             except Exception as e:
-                print(f" [失敗: {e}，重試中 ({attempt}/{MAX_RETRIES})]")
-                time.sleep(3)
-        else:
-            print(f" ❌ 第 {current_floor_page} 頁宣告放棄，跳過。")
+                print(f" [錯誤: {e}]")
+                time.sleep(2)
         
         current_floor_page += 1
 
@@ -262,13 +244,9 @@ def boards_crawler(board_name, bsn, list_page):
     print(f"[{board_name}] 正在讀取列表第 {list_page} 頁...")
 
     try:
-        response = requests.get(target_url, headers=HEADERS, cookies=COOKIES, timeout=5)
+        response = requests.get(target_url, headers=HEADERS, cookies=COOKIES, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         rows = soup.select('tr.b-list__row')
-
-        if not rows:
-            print(f"    ⚠️ 第 {list_page} 頁沒有抓到任何文章列表")
-            return
 
         for row in rows:
             if 'b-list__row--sticky' in row.get('class', []): continue
@@ -286,6 +264,11 @@ def boards_crawler(board_name, bsn, list_page):
                 continue
 
             title = a_tag.select_one('.b-list__main__title').text.strip()
+            
+            # 標題防呆過濾
+            if not title or title == "標題" or len(title) < 2:
+                continue
+
             if any(keyword in title for keyword in BLOCK_KEYWORDS): continue
 
             full_link = "https://forum.gamer.com.tw/" + raw_link
@@ -299,23 +282,14 @@ def boards_crawler(board_name, bsn, list_page):
             }
             
             print(f"  └── 發現文章: {title[:15]}...")
-            
             crawl_article_pages(base_meta, list_page)
-            
-            time.sleep(1)
 
     except Exception as e:
         print(f"列表頁錯誤: {e}")
 
 if __name__ == "__main__":
     for board in TARGET_BOARDS:
-        print(f"\n{'='*40}")
-        print(f"開始任務：{board['name']} (抓取前 {MAX_LIST_PAGES} 頁列表)")
-        print(f"{'='*40}")
-        
         for page in range(1, MAX_LIST_PAGES + 1):
             boards_crawler(board["name"], board['bsn'], page)
-            print(f"💤 列表第 {page} 頁完成，休息 3 秒...")
             time.sleep(3)
-
     print("\n✅ 所有爬蟲任務已完成！")

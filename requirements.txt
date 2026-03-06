@@ -1,5 +1,7 @@
 requests
-pymysql
 beautifulsoup4
+pymysql
 python-dotenv
 groq
+streamlit
+pandas

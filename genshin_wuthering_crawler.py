@@ -16,8 +16,8 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 # ==========================================
 load_dotenv()
 DB_PASSWORD = os.getenv("DB_PASSWORD")
-IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None
-
+# 同時支援判斷 Cloud Run Service (網頁) 與 Cloud Run Job (任務)
+IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None or os.getenv('CLOUD_RUN_JOB') is not None
 # 資料庫連線設定
 db_config = {
     "user": "root",
@@ -43,9 +43,9 @@ TARGET_BOARDS = [
     {"name": "鳴潮", "bsn": "74934"}
 ]
 
-BLOCK_KEYWORDS = ["版規", "置頂", "公告", "刪除", "兌換", "邀請碼", "序號", "好友", "網頁活動", "互助", "健檢", "隊伍配置", "大佬集中串", "贈送", "祖傳聖遺物", "新手須知"]
+BLOCK_KEYWORDS = ["版規", "置頂", "公告", "刪除", "兌換", "邀請" ,"序號", "好友", "網頁活動", "互助", "健檢", "隊伍配置", "大佬集中串", "贈送", "祖傳聖遺物", "新手須知"]
 
-MAX_LIST_PAGES = 20   # 測試用 1 頁，正式跑可改回 10 或 20
+MAX_LIST_PAGES = 20   # 測試用 1 頁
 DAYS_LIMIT = 180     # 只抓半年內的文章
 
 # ==========================================
@@ -77,11 +77,6 @@ def save_to_db(data):
     try:
         connection = pymysql.connect(**db_config)
         with connection.cursor() as cursor:
-            # 🌟【核心修改】SQL Upsert 邏輯優化
-            # 1. 如果 uuid 不存在 -> 執行 INSERT (新文章)
-            # 2. 如果 uuid 存在 -> 執行 UPDATE (舊文章)
-            # 3. scraped_at 更新邏輯：只有當「內容 (content) 變更」時，才更新 scraped_at
-            
             sql = """
             INSERT INTO bahamut_posts (
                 uuid, bsn, sna, board_name, title, content, post_url, 
@@ -98,13 +93,11 @@ def save_to_db(data):
                 bp_count = VALUES(bp_count),
                 total_content_pages = VALUES(total_content_pages),
                 
-                -- 智慧比對：若新抓到的 content 與資料庫不同，更新爬取時間；否則維持原時間
                 scraped_at = CASE 
                     WHEN content != VALUES(content) THEN VALUES(scraped_at)
                     ELSE scraped_at 
                 END,
 
-                -- 最後才更新 content (必須放在比對之後)
                 content = VALUES(content);
             """
             
@@ -132,7 +125,6 @@ def crawl_article_pages(base_meta, list_page_num):
     current_floor_page = 1
     total_content_pages_val = 1 
     
-    # 宣告變數來記住這篇文章的發文時間
     thread_created_at = None
 
     while current_floor_page <= total_content_pages_val:
@@ -162,7 +154,7 @@ def crawl_article_pages(base_meta, list_page_num):
                 
                 final_created_at = thread_created_at if thread_created_at else datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                # 檢查文章是否過期 (只在第1頁檢查)
+                # 檢查文章是否過期
                 if current_floor_page == 1 and thread_created_at:
                     try:
                         post_date = datetime.datetime.strptime(thread_created_at, '%Y-%m-%d %H:%M:%S')
@@ -182,14 +174,35 @@ def crawl_article_pages(base_meta, list_page_num):
                     if page_numbers:
                         total_content_pages_val = max(page_numbers)
 
-                # --- 內文抓取 ---
+                # --- 內文抓取 (修正版) ---
                 all_text_blocks = soup.select('.c-article__content, .reply-content__article .comment_content')
                 content_list = []
+                
                 for block in all_text_blocks:
+                    # 1. 移除勇者卡片
                     for gamercard in block.select('.article_gamercard'):
                         gamercard.decompose()
-                    content_list.append(block.text.strip())
+                    
+                    # 2. 取得純文字並去除前後空白
+                    raw_text = block.text.strip()
+                    
+                    # 🔥【修改點 1】如果內容為空 (例如只有貼圖或純空白)，直接跳過
+                    if not raw_text:
+                        continue 
+
+                    # 3. 判斷身份
+                    classes = block.get('class', [])
+                    
+                    if 'c-article__content' in classes:
+                        # 🔥【修改點 2】修正稱呼為「蓋樓者」
+                        prefix = "【蓋樓者】"
+                    else:
+                        prefix = "【回覆者】"
+
+                    # 4. 組合字串
+                    content_list.append(f"{prefix}：{raw_text}")
                 
+                # 5. 合併並清洗
                 full_content = "\n\n".join(content_list)
                 full_content = clean_text_content(full_content)
 
@@ -207,7 +220,6 @@ def crawl_article_pages(base_meta, list_page_num):
                         if gp_tag: gp_count = safe_int(gp_tag.text)
                         if bp_tag: bp_count = safe_int(bp_tag.text)
 
-                # 固定 UUID 生成邏輯 (BSN + SNA + 頁數)
                 unique_key_str = f"{base_meta['bsn']}_{base_meta['sna']}_{current_floor_page}"
                 fixed_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, unique_key_str))
 
@@ -236,6 +248,10 @@ def crawl_article_pages(base_meta, list_page_num):
             except Exception as e:
                 print(f" [錯誤: {e}]")
                 time.sleep(2)
+
+        else:
+            # 這是與 for 對齊的 else，代表「break 沒有被觸發 (3次都失敗了)」
+            print(f" ❌ 第 {current_floor_page} 頁重試 3 次皆失敗，放棄該頁。")
         
         current_floor_page += 1
 
@@ -265,7 +281,6 @@ def boards_crawler(board_name, bsn, list_page):
 
             title = a_tag.select_one('.b-list__main__title').text.strip()
             
-            # 標題防呆過濾
             if not title or title == "標題" or len(title) < 2:
                 continue
 

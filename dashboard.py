@@ -2,13 +2,39 @@ import streamlit as st
 import pymysql
 import pandas as pd
 import os
-import time
+import json
+from collections import Counter
 from dotenv import load_dotenv
+import altair as alt
 
 # ==========================================
 # 1. 設定與連線
 # ==========================================
 load_dotenv()
+
+# 加入雲端與本機的資料庫連線自動切換邏輯
+IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None or os.getenv('CLOUD_RUN_JOB') is not None
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+
+if IS_CLOUD_RUN:
+    db_config = {
+        "unix_socket": "/cloudsql/games-sentiment-analysis:asia-east1:game-sentiment-db",
+        "user": "root",
+        "password": DB_PASSWORD,
+        "db": "sentiment_monitor",
+        "charset": "utf8mb4",
+        "cursorclass": pymysql.cursors.DictCursor
+    }
+else:
+    db_config = {
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "root",
+        "password": DB_PASSWORD,
+        "db": "sentiment_monitor",
+        "charset": "utf8mb4",
+        "cursorclass": pymysql.cursors.DictCursor
+    }
 
 st.set_page_config(
     page_title="遊戲輿情分析戰情室",
@@ -16,25 +42,34 @@ st.set_page_config(
     layout="wide"
 )
 
-# 關閉快取，確保除錯時看到最新資料
-# @st.cache_data(ttl=60) 
+# 加入自訂 CSS
+st.markdown(
+    """
+    <style>
+    div[data-baseweb="select"] > div {
+        background-color: #f0f2f6;
+        border: 2px solid #FF4B4B;
+        border-radius: 5px;
+        color: black;
+    }
+    div[data-baseweb="popover"] li {
+         font-weight: bold;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 def get_data():
     try:
-        conn = pymysql.connect(
-            host='127.0.0.1',
-            user='root',
-            password=os.getenv('DB_PASSWORD'),
-            db='sentiment_monitor',
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor
-        )
-        
-        # 抓取文章與分析結果
+        conn = pymysql.connect(**db_config)
         sql = """
         SELECT 
+            p.uuid,
             p.board_name, 
             p.title, 
             p.content,
+            p.post_url, 
             p.created_at, 
             p.gp_count, 
             p.bp_count,
@@ -45,20 +80,11 @@ def get_data():
         JOIN sentiment_results s ON p.uuid = s.post_uuid
         ORDER BY p.created_at DESC
         """
-        
-        # 🔥【修改重點】不使用 pd.read_sql，改用最穩定的 cursor 抓取 🔥
         with conn.cursor() as cursor:
             cursor.execute(sql)
             result = cursor.fetchall()
-            
         conn.close()
-        
-        # 直接把 List[Dict] 轉成 DataFrame，這招保證不會錯
-        if result:
-            return pd.DataFrame(result)
-        else:
-            return pd.DataFrame()
-            
+        return pd.DataFrame(result) if result else pd.DataFrame()
     except Exception as e:
         st.error(f"❌ 資料庫連線失敗: {e}")
         return pd.DataFrame()
@@ -68,135 +94,250 @@ def get_data():
 # ==========================================
 raw_df = get_data()
 
-st.title("🎮 遊戲輿情分析戰情室")
-st.markdown("監控巴哈姆特熱門遊戲板的情緒趨勢與關鍵議題")
+st.title("🎮 巴哈姆特遊戲輿情分析室")
 
-# 🔍【除錯專區】如果還是沒資料，這裡會告訴我們發生什麼事
 if raw_df.empty:
-    st.warning("⚠️ 警告：資料庫連線成功，但沒有抓到任何資料 (JOIN 結果為 0)。")
-    st.info("請檢查：1. 爬蟲有跑嗎？ 2. 分析程式有跑嗎？ 3. 是否清空過資料庫但沒重跑？")
+    st.warning("⚠️ 目前資料庫中沒有分析資料。")
     st.stop()
-else:
-    # 偷偷顯示一下抓到了幾筆，讓你知道它活著
-    st.toast(f"✅ 成功載入 {len(raw_df)} 筆分析資料", icon="🚀")
 
-# --- 資料清洗與轉型 ---
-# 1. 強制轉分數為數字
+# --- 資料清洗 ---
 raw_df['sentiment_score'] = pd.to_numeric(raw_df['sentiment_score'], errors='coerce')
-# 2. 強制轉時間格式
 raw_df['created_at'] = pd.to_datetime(raw_df['created_at'], errors='coerce')
-
-# 3. 移除壞掉的資料
 df = raw_df.dropna(subset=['sentiment_score', 'created_at']).copy()
 
-# 再次檢查清洗後是否還有資料
-if df.empty:
-    st.error("❌ 嚴重錯誤：資料抓到了，但格式全部錯誤，被清洗光了！")
-    st.write("原始資料預覽：", raw_df.head())
-    st.stop()
+def parse_json(x):
+    try:
+        return json.loads(x)
+    except:
+        return {}
+
+df['parsed_result'] = df['analysis_result'].apply(parse_json)
 
 # ==========================================
-# 3. 側邊欄過濾器 (Sidebar Filter)
+# 3. 側邊欄過濾器
 # ==========================================
 st.sidebar.header("🔍 篩選條件")
-
-# 遊戲看板選擇
 all_boards = df['board_name'].unique().tolist()
 selected_board = st.sidebar.selectbox("選擇遊戲看板", ["全部"] + all_boards)
+search_keyword = st.sidebar.text_input("輸入關鍵字搜尋", placeholder="例如：愛彌斯、劇情...")
 
-# 過濾資料
+filtered_df = df.copy()
 if selected_board != "全部":
-    filtered_df = df[df['board_name'] == selected_board]
-else:
-    filtered_df = df
+    filtered_df = filtered_df[filtered_df['board_name'] == selected_board]
+if search_keyword:
+    mask = (filtered_df['title'].str.contains(search_keyword, case=False, na=False) | 
+            filtered_df['content'].str.contains(search_keyword, case=False, na=False))
+    filtered_df = filtered_df[mask]
 
 # ==========================================
 # 4. 關鍵指標 (KPIs)
 # ==========================================
 col1, col2, col3, col4 = st.columns(4)
-
 total_posts = len(filtered_df)
 
 if not filtered_df.empty:
     avg_score = filtered_df['sentiment_score'].mean()
     positive_ratio = (filtered_df['sentiment_score'] > 0).mean() * 100
-    
     max_date = filtered_df['created_at'].max()
-    if pd.notna(max_date):
-        latest_update = max_date.strftime('%Y-%m-%d %H:%M')
-    else:
-        latest_update = "N/A"
+    latest_update = max_date.strftime('%Y-%m-%d %H:%M') if pd.notna(max_date) else "N/A"
 else:
-    avg_score = 0.0
-    positive_ratio = 0.0
-    latest_update = "N/A"
+    avg_score = 0.0; positive_ratio = 0.0; latest_update = "N/A"
 
-with col1:
-    st.metric("分析文章總數", f"{total_posts} 篇")
-with col2:
-    delta_color = "normal"
-    if avg_score > 1: delta_color = "normal"
-    elif avg_score < -1: delta_color = "inverse"
-    st.metric("平均情緒指數", f"{avg_score:.2f}", delta_color=delta_color)
-with col3:
-    st.metric("正面評價佔比", f"{positive_ratio:.1f}%")
-with col4:
-    st.metric("最後更新時間", latest_update)
+col1.metric("文章篇數", f"{total_posts} 篇")
+col2.metric("平均情緒", f"{avg_score:.2f}")
+col3.metric("正面佔比", f"{positive_ratio:.1f}%")
+col4.metric("最後更新", latest_update)
+
+st.divider()
+
+if not filtered_df.empty:
+    # 萃取 AI 分析的細部特徵
+    all_categories = []
+    all_keywords = []
+    all_characters = []
+
+    for _, row in filtered_df.iterrows():
+        result = row['parsed_result']
+        if result and 'reviews' in result:
+            for review in result['reviews']:
+                main_cat = review.get('main_category', '其他')
+                sub_cat = review.get('sub_category', '其他')
+                sentiment = float(review.get('sentiment_score', 0))
+                target_char = review.get('target_character')
+                
+                all_categories.append({
+                    "main": main_cat,
+                    "sub": sub_cat,
+                    "sentiment": sentiment
+                })
+                all_keywords.extend(review.get('keywords', []))
+                
+                # 蒐集角色資料 (排除 null 或空值)
+                if target_char and str(target_char).strip().lower() not in ['null', 'none', '']:
+                    all_characters.append({
+                        "character": str(target_char).strip(),
+                        "sentiment": sentiment
+                    })
+
+    cat_df = pd.DataFrame(all_categories)
+    
+    # ==========================================
+    # 5. 輿情時間趨勢圖
+    # ==========================================
+    st.subheader("📈 輿情時間趨勢圖")
+    trend_df = filtered_df.copy()
+    trend_df['date'] = trend_df['created_at'].dt.date
+    daily_trend = trend_df.groupby('date').agg(
+        文章數=('uuid', 'count'),
+        平均情緒=('sentiment_score', 'mean')
+    ).reset_index()
+
+    base = alt.Chart(daily_trend).encode(x=alt.X('date:T', title='日期'))
+    line = base.mark_line(color='#A9A9A9', strokeDash=[5, 5]).encode(y=alt.Y('平均情緒:Q', title='平均情緒分數', scale=alt.Scale(domain=[-5, 5])))
+    points = base.mark_circle().encode(
+        y=alt.Y('平均情緒:Q'),
+        size=alt.Size('文章數:Q', title='討論熱度 (文章數)', scale=alt.Scale(range=[50, 500])),
+        color=alt.Color('平均情緒:Q', scale=alt.Scale(scheme='redyellowgreen', domain=[-5, 5]), legend=None),
+        tooltip=['date:T', '文章數:Q', alt.Tooltip('平均情緒:Q', format='.2f')]
+    )
+    st.altair_chart(line + points, use_container_width=True)
+
+    st.divider()
+
+    # ==========================================
+    # 6. 情緒分佈與角色排行
+    # ==========================================
+    col_s1, col_s2 = st.columns(2)
+    
+    with col_s1:
+        st.subheader("📊 整體情緒分佈")
+        def categorize_sentiment(score):
+            if score > 0: return '正面 😊'
+            elif score < 0: return '負面 😡'
+            else: return '中立 😐'
+        
+        pie_df = filtered_df.copy()
+        pie_df['情緒類別'] = pie_df['sentiment_score'].apply(categorize_sentiment)
+        pie_counts = pie_df['情緒類別'].value_counts().reset_index()
+        pie_counts.columns = ['情緒類別', '文章數']
+        
+        pie_chart = alt.Chart(pie_counts).mark_arc(innerRadius=60).encode(
+            theta=alt.Theta(field="文章數", type="quantitative"),
+            color=alt.Color(field="情緒類別", type="nominal", scale=alt.Scale(
+                domain=['正面 😊', '中立 😐', '負面 😡'],
+                range=['#28a745', '#cccccc', '#dc3545']
+            )),
+            tooltip=['情緒類別', '文章數']
+        )
+        st.altair_chart(pie_chart, use_container_width=True)
+
+    with col_s2:
+        st.subheader("🏆 熱門角色好感度排行")
+        if all_characters:
+            char_df = pd.DataFrame(all_characters)
+            char_stats = char_df.groupby('character').agg(
+                討論次數=('character', 'count'),
+                平均好感度=('sentiment', 'mean')
+            ).reset_index()
+            char_stats = char_stats.sort_values(by='討論次數', ascending=False).head(8)
+            
+            char_chart = alt.Chart(char_stats).mark_bar().encode(
+                x=alt.X('討論次數:Q', title='討論次數'),
+                y=alt.Y('character:N', sort='-x', title='角色'),
+                color=alt.Color('平均好感度:Q', scale=alt.Scale(scheme='redyellowgreen', domain=[-5, 5]), title='好感度'),
+                tooltip=['character:N', '討論次數:Q', alt.Tooltip('平均好感度:Q', format='.2f')]
+            )
+            st.altair_chart(char_chart, use_container_width=True)
+        else:
+            st.info("目前的篩選條件下無角色討論資料")
+
+    st.divider()
+
+    # ==========================================
+    # 7. 議題分析與關鍵字
+    # ==========================================
+    col_k1, col_k2 = st.columns(2)
+
+    with col_k1:
+        st.subheader("🔥 熱門討論議題 (主次分類下鑽)")
+        if not cat_df.empty:
+            sub_cats = cat_df.groupby(['main', 'sub']).size().reset_index(name='討論次數')
+            top_mains = cat_df['main'].value_counts().head(5).index
+            sub_cats_top = sub_cats[sub_cats['main'].isin(top_mains)]
+            
+            chart = alt.Chart(sub_cats_top).mark_bar().encode(
+                x=alt.X('sum(討論次數):Q', title='總討論次數'),
+                y=alt.Y('main:N', sort='-x', title='主分類'),
+                color=alt.Color('sub:N', title='次分類 (圖例)'),
+                tooltip=['main', 'sub', '討論次數']
+            )
+            st.altair_chart(chart, use_container_width=True)
+
+    with col_k2:
+        st.subheader("💬 熱門關鍵字雲")
+        if all_keywords:
+            stop_words = {"，", "。", "！", "？", "、", "；", "：", "（", "）", " ", "", ",", ".", "(", ")", "!", "?"}
+            clean_keywords = [kw for kw in all_keywords if kw not in stop_words and len(kw.strip()) > 1]
+            keyword_counts = Counter(clean_keywords).most_common(12)
+            
+            st.write("玩家最常提到的詞彙：")
+            for word, count in keyword_counts:
+                # 簡單利用 Markdown 語法調整大小粗細
+                size = min(1.5, 0.8 + (count / (len(clean_keywords) or 1)) * 10) 
+                st.markdown(f"**{word}** ({count}次)")
+        else:
+            st.info("無關鍵字資料")
 
 st.divider()
 
 # ==========================================
-# 5. 圖表視覺化
+# 8. 單篇深度檢視
 # ==========================================
-col_chart1, col_chart2 = st.columns([2, 1])
-
-with col_chart1:
-    st.subheader("📈 情緒趨勢變化 (日均)")
-    if not filtered_df.empty:
-        daily_trend = filtered_df.groupby(filtered_df['created_at'].dt.date)['sentiment_score'].mean()
-        st.line_chart(daily_trend)
-    else:
-        st.info("無資料可顯示趨勢圖")
-
-with col_chart2:
-    st.subheader("📊 情緒分佈")
-    if not filtered_df.empty:
-        def categorize_score(score):
-            if score > 1: return "正面 (>1)"
-            if score < -1: return "負面 (<-1)"
-            return "中立 (-1~1)"
-        
-        dist_df = filtered_df['sentiment_score'].apply(categorize_score).value_counts()
-        st.bar_chart(dist_df)
-    else:
-        st.info("無資料可顯示分佈圖")
-
-# ==========================================
-# 6. 詳細文章列表
-# ==========================================
-st.subheader("📋 最新分析文章")
+st.subheader("📋 文章深度檢視")
 
 if not filtered_df.empty:
-    display_cols = ['created_at', 'board_name', 'title', 'sentiment_score', 'gp_count']
-    st.dataframe(
-        filtered_df[display_cols].style.background_gradient(subset=['sentiment_score'], cmap='RdYlGn', vmin=-5, vmax=5),
-        use_container_width=True,
-        column_config={
-            "created_at": "發文時間",
-            "board_name": "看板",
-            "title": "標題",
-            "sentiment_score": "情緒分",
-            "gp_count": "推文數"
-        }
-    )
-else:
-    st.write("目前沒有符合條件的文章。")
+    display_df = filtered_df.reset_index(drop=True)
+    post_options = display_df.apply(
+        lambda x: f"{x['created_at'].strftime('%m-%d')} | {x['title']} (分: {x['sentiment_score']})", axis=1
+    ).tolist()
+    
+    selected_option = st.selectbox("請選擇文章：", post_options)
+    selected_index = post_options.index(selected_option)
+    selected_post = display_df.iloc[selected_index]
+    
+    with st.container(border=True):
+        st.markdown(f"### 📄 {selected_post['title']}")
+        st.caption(f"發文時間: {selected_post['created_at']} | 看板: {selected_post['board_name']} | 推: {selected_post['gp_count']}")
+        
+        post_url = selected_post.get('post_url')
+        if post_url:
+            st.link_button("🔗 前往巴哈姆特閱讀原文", post_url)
 
-# ==========================================
-# 7. 原始資料 (隱藏)
-# ==========================================
-with st.expander("🔍 查看原始資料"):
-    if not filtered_df.empty:
-        st.write(filtered_df[['title', 'analysis_result', 'model_name']])
-    else:
-        st.write("無資料")
+        with st.expander("閱讀原始內文"):
+            st.text(selected_post['content'])
+        
+        st.divider()
+        
+        parsed_data = selected_post['parsed_result']
+        if parsed_data and 'reviews' in parsed_data:
+            st.write("#### 🤖 AI 分析觀點")
+            reviews = parsed_data['reviews']
+            cols = st.columns(2)
+            for i, review in enumerate(reviews):
+                col = cols[i % 2]
+                score = review.get('sentiment_score', 0)
+                emoji = "😊" if score > 0 else "😡" if score < 0 else "😐"
+                with col:
+                    with st.container(border=True):
+                        target_char = review.get('target_character')
+                        char_tag = f"【{target_char}】" if target_char and str(target_char).lower() != 'null' else ""
+                        st.markdown(f"**{emoji} {char_tag}{review.get('main_category')} - {review.get('sub_category')}**")
+                        st.markdown(f"分數: `{score}`")
+                        st.write(f"💬 {review.get('reason')}")
+                        kws = review.get('keywords', [])
+                        if kws:
+                            st.caption("關鍵字: " + " 、 ".join([f"`{k}`" for k in kws]))
+        else:
+            st.warning("這篇文章似乎沒有詳細的分析資料")
+else:
+    st.info("目前沒有文章可供分析")

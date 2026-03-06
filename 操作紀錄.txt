@@ -1,0 +1,15 @@
+// 爬蟲 & 分析 打包指令
+
+docker build -f Dockerfile.job -t gcr.io/games-sentiment-analysis/game-pipeline-job .
+docker push gcr.io/games-sentiment-analysis/game-pipeline-job
+
+
+// streamlit 打包指令
+
+docker build --platform linux/amd64 -f Dockerfile.web -t gcr.io/games-sentiment-analysis/game-dashboard-web .
+docker push gcr.io/games-sentiment-analysis/game-dashboard-web
+
+gcloud run deploy game-dashboard-service \
+  --image gcr.io/games-sentiment-analysis/game-dashboard-web \
+  --region asia-east1
+

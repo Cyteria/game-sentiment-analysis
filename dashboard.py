@@ -162,6 +162,13 @@ if not filtered_df.empty:
             for review in result['reviews']:
                 main_cat = review.get('main_category', '其他')
                 sub_cat = review.get('sub_category', '其他')
+                
+                # 🔥 將所有的 bug/BUG 變形體統一轉換為首字母大寫的 'Bug'
+                if isinstance(main_cat, str) and main_cat.lower() == 'bug':
+                    main_cat = 'Bug'
+                if isinstance(sub_cat, str) and sub_cat.lower() == 'bug':
+                    sub_cat = 'Bug'
+
                 sentiment = float(review.get('sentiment_score', 0))
                 target_char = review.get('target_character')
                 

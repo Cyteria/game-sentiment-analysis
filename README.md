@@ -47,15 +47,15 @@
 *(下方圖片如無法顯示，請確認圖片連結是否正確)*
 
 ### 1. 戰情室總覽與時間趨勢
-![Dashboard Overview]([<img width="1708" height="818" alt="截圖 2026-03-07 凌晨1 39 51" src="https://github.com/user-attachments/assets/de97e12c-e1b1-48a3-8806-ed9e6a5761ae" />
+([<img width="1708" height="818" alt="截圖 2026-03-07 凌晨1 39 51" src="https://github.com/user-attachments/assets/de97e12c-e1b1-48a3-8806-ed9e6a5761ae" />
 ])
 
 ### 2. 角色好感度排行與分類下鑽
-![Character Sentiment]([<img width="1707" height="915" alt="截圖 2026-03-07 凌晨1 40 11" src="https://github.com/user-attachments/assets/c73abbb6-4e36-4a44-af6d-cdbf530ef742" />
+([<img width="1707" height="915" alt="截圖 2026-03-07 凌晨1 40 11" src="https://github.com/user-attachments/assets/c73abbb6-4e36-4a44-af6d-cdbf530ef742" />
 ])
 
 ### 3. AI 單篇深度分析
-![Deep Dive]([<img width="1709" height="897" alt="截圖 2026-03-07 凌晨1 42 12" src="https://github.com/user-attachments/assets/242dfdc2-d0c8-46e6-97e4-f6f5350912ff" />
+([<img width="1709" height="897" alt="截圖 2026-03-07 凌晨1 42 12" src="https://github.com/user-attachments/assets/242dfdc2-d0c8-46e6-97e4-f6f5350912ff" />
 ])
 
 ---

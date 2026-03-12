@@ -1,97 +1,86 @@
-# 🎮 巴哈姆特遊戲輿情分析室 (Game Sentiment Analysis)
+# 🎮 全自動遊戲社群輿情觀測戰情室 (Game Community Sentiment Dashboard)
 
-這是一個全自動化的遊戲社群輿情觀測站。本專案透過自動化爬蟲抓取巴哈姆特論壇的玩家討論，結合大語言模型 (LLM) 進行深度的情緒與語意分析，並將結果具象化為 24 小時即時更新的雲端視覺化戰情室。
+[![Deployed on GCP Cloud Run](https://img.shields.io/badge/Deployed%20on-GCP%20Cloud%20Run-4285F4?style=flat-square&logo=google-cloud)](https://game-dashboard-service-511900659220.asia-east1.run.app/)
+[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square&logo=python&logoColor=white)]()
+[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)]()
 
-🔗 **即時戰情室展示**：( 點擊這裡觀看即時數據：[https://game-dashboard-service-511900659220.asia-east1.run.app/] )
+> **24 小時無人值守的數據中心，將冰冷的文字即時轉化為商業洞察。**
 
----
+本專案致力於打造一個全自動化的遊戲社群輿情觀測站。透過定時抓取指標性論壇數據，並導入大型語言模型（LLM）進行深度語意解析，幫助遊戲營運與行銷團隊一眼看穿「新角色受歡迎程度」或潛在的「炎上趨勢」，將社群聲音轉化為具體的商業決策依據。
 
-## ✨ 核心特色與架構
-
-本專案採用**微服務架構 (Microservices)** 設計，將「資料獲取」、「AI 分析」與「前端展示」解耦，確保系統的穩定性與擴充性，並完全部署於 Google Cloud Platform (GCP)。
-
-1. 🕷️ **自動化資料管線 (Data Pipeline)**
-   - 透過 Python 爬蟲定時抓取巴哈姆特特定遊戲看板（本案抓取：鳴潮、原神）的最新文章與推噓文數據。
-   - 可修改各版 ID 新增抓取不同版的資訊。
-   - 使用 GCP Cloud Scheduler 設定定時任務，實現完全無人值守的自動化每日抓取。
-
-2. 🤖 **AI 智慧語意分析 (LLM Integration)**
-   - 串接 **Groq API**，利用高效能 LLM 對每一篇文章進行深度拆解。
-   - 不只判斷「正/負面情緒分數」，更能精準萃取出：**討論主/次分類** (如：Bug、劇情、優化)、**目標角色** (Target Character) 以及 **核心關鍵字**。
-   - 具備防呆機制：自動處理 API Rate Limit，並支援多把金鑰自動切換與「少量多餐」的批次處理邏輯。
-
-3. 📊 **互動式視覺化儀表板 (Streamlit Dashboard)**
-   - **時間趨勢追蹤**：掌握每次版本更新或炎上事件的情緒波動。
-   - **整體情緒分佈**：直觀的甜甜圈圖展示社群正負面比例。
-   - **熱門角色好感度排行**：精準洞察玩家對特定角色的喜惡程度。
-   - **議題下鑽分析**：透過堆疊長條圖與文字雲，快速抓出玩家痛點。
-   - **單篇深度檢視**：直接在介面上查看 AI 對單篇文章的詳細判讀理由與給分。
+🔗 **[點此訪問即時戰情室 (Live Demo)](https://game-dashboard-service-511900659220.asia-east1.run.app/)**
 
 ---
 
-## 🛠️ 技術棧 (Tech Stack)
+## ✨ 核心特色 (Key Features)
 
-- **前端與視覺化**: Streamlit, Altair, Pandas
-- **後端與資料處理**: Python 3, PyMySQL, JSON
-- **AI 整合**: Groq API (LLM)
-- **雲端基礎設施 (GCP)**: 
-  - Google Cloud Run (容器化網頁代管與獨立任務)
-  - Google Cloud SQL (MySQL 雲端資料庫)
-  - Google Cloud Scheduler (自動化排程器)
-- **部署工具**: Docker
-
----
-
-## 📸 畫面截圖預覽
-
-*(下方圖片如無法顯示，請確認圖片連結是否正確)*
-
-### 1. 戰情室總覽與時間趨勢
-([<img width="1708" height="818" alt="截圖 2026-03-07 凌晨1 39 51" src="https://github.com/user-attachments/assets/de97e12c-e1b1-48a3-8806-ed9e6a5761ae" />
-])
-
-### 2. 角色好感度排行與分類下鑽
-([<img width="1707" height="915" alt="截圖 2026-03-07 凌晨1 40 11" src="https://github.com/user-attachments/assets/c73abbb6-4e36-4a44-af6d-cdbf530ef742" />
-])
-
-### 3. AI 單篇深度分析
-([<img width="1709" height="897" alt="截圖 2026-03-07 凌晨1 42 12" src="https://github.com/user-attachments/assets/242dfdc2-d0c8-46e6-97e4-f6f5350912ff" />
-])
+* 🕷️ **全自動化爬蟲 (Automated Crawlers)**
+    * 定時抓取巴哈姆特 (gamer.com.tw) 等指標性遊戲看板。
+    * 無需人工介入，確保資料來源 24 小時不間斷，掌握第一手社群動態。
+* 🧠 **AI 智慧大腦 (AI Smart Brain)**
+    * 導入大型語言模型 (LLM) 進行深度語意解析，精準判讀玩家真實情緒（Sentiment）與發文意圖（Intention）。
+    * 超越傳統字典或字串比對，能精準萃取上下文中的關鍵字，並具備完善的停用詞（Stop Words）過濾機制，排除系統干擾雜訊。
+* 📊 **即時戰情室 (Real-Time Situation Room)**
+    * 透過 Streamlit 打造互動式資料視覺化儀表板。
+    * 提供情緒分佈圓餅圖、輿情熱度趨勢線、以及精煉後的熱門關鍵字文字雲，一眼看穿社群風向。
 
 ---
 
-## 🚀 系統部署與運行指南
+## 🛠️ 技術架構 (Tech Stack)
 
-### 1. 環境變數設定
-請在專案根目錄建立 `.env` 檔案，並填入以下資訊：
-```env
-DB_PASSWORD=[資料庫密碼]
-GROQ_API_KEY=[第一把Groq金鑰]
-GROQ_API_KEY_2=[第二把Groq金鑰]
-GROQ_API_KEY_3 .....
+* **前端與視覺化 (Frontend & Visualization):** Streamlit
+* **後端與資料處理 (Backend & Data Processing):** Python, Pandas
+* **自然語言處理 (NLP):** LLM API (情緒與意圖分析)、Jieba (斷詞與停用詞過濾)
+* **資料獲取 (Data Pipeline):** Python Web Scraping (Requests / BeautifulSoup)
+* **資料庫 (Database):** 關聯式 / 非關聯式資料庫 (MySQL / MongoDB)
+* **部署與維運 (Deployment & DevOps):** Docker, Google Cloud Platform (GCP Cloud Run)
 
-2. 本機開發運行 (Local Development)
-安裝所需套件並啟動 Streamlit 伺服器：
+---
 
-Bash
+## 🚀 快速開始 (Getting Started)
+
+### 1. 複製專案 (Clone the repository)
+```bash
+git clone [https://github.com/Cyteria/game-sentiment-analysis.git](https://github.com/Cyteria/game-sentiment-analysis.git)
+cd your-repo-name
+```
+
+### 2. 安裝依賴套件 (Install dependencies)
+建議使用虛擬環境 (Virtual Environment) 進行安裝：
+```bash
 pip install -r requirements.txt
+```
+
+### 3. 環境變數設定 (Environment Variables)
+請在根目錄建立 .env 檔案，並填入必要的 API 金鑰與資料庫連線資訊：
+
+```
+GROQ_API_KEY=your_api_key_1
+GROQ_API_KEY_2=your_api_key_2
+...
+DB_PASSWORD=your_password
+GOOGLE_API_KEY=your_google_api_key
+```
+
+### 4. 啟動本機儀表板 (Run Streamlit App Locally)
+
+```bash
 streamlit run dashboard.py
-(註：本機運行時，程式會自動識別環境並透過 127.0.0.1 尋找資料庫，需搭配 Cloud SQL Auth Proxy 使用)
+```
 
-3. 雲端部署架構 (Docker + GCP)
-本專案的 Dockerfile 已分別為「定時任務 (Job)」與「網頁服務 (Web)」進行優化：
+執行後，如果在本地運行，請開啟瀏覽器前往 http://localhost:8501 即可查看畫面。
 
-Dockerfile.web: 用於打包並部署 Streamlit 儀表板 (game-dashboard-service)。
+本案支援雲端環境判斷，部署在 GCP 雲端上也可執行。
 
-Dockerfile.job: 用於打包後端自動化腳本，並在 Cloud Run 分拆為兩個獨立的 Job：
+📂 專案結構 (Project Structure)
+Plaintext
+├── dashboard.py          # Streamlit 儀表板主程式
+├── scraper/              # 巴哈姆特自動化爬蟲模組
+├── nlp_processing/       # LLM API 串接與語意解析邏輯
+├── data_cleaning/        # 包含 stop_words.txt 與資料前處理指令碼
+├── requirements.txt      # Python 依賴套件清單
+├── Dockerfile            # GCP Cloud Run 部署用 Docker 設定檔
+└── README.md             # 專案說明文件
 
-game-crawler-task: 專責抓取新資料。
-
-game-analysis-task: 專責消化未分析的文章 (Batch processing)。
-
-📝 聯絡資訊與授權 (License)
-Author: [Cyteria]
-
-GitHub: [https://github.com/Cyteria/game-sentiment-analysis/]
-
-This project is licensed under the MIT License.
+👨‍💻 開發人員
+[Cyter] - Data Engineering

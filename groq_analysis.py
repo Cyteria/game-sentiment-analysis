@@ -29,7 +29,7 @@ IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None or os.getenv('CLOUD_RUN_JOB') 
 if IS_CLOUD_RUN:
     db_config = {"unix_socket": "/cloudsql/games-sentiment-analysis:asia-east1:game-sentiment-db"}
 else:
-    db_config = {"host": "127.0.0.1", "port": 3306} # 確保本機也是用這個
+    db_config = {"host": "127.0.0.1", "port": 3306}
 
 DB_SETTINGS = {
     "user": "root", "password": DB_PASSWORD, "db": "sentiment_monitor",
@@ -115,7 +115,7 @@ def ask_groq_analysis(text):
     }}
     """
 
-    # 🔥 優化邏輯：優先嘗試最好的模型，如果所有金鑰都不能跑好模型，才降級
+    # 優先嘗試最好的模型，如果所有金鑰都不能跑好模型，才降級
     for model in MODELS:
         for key_index, api_key in enumerate(API_KEYS):
             client = Groq(api_key=api_key)

@@ -40,7 +40,9 @@ COOKIES = {"ckBH_over18": "1"}
 
 TARGET_BOARDS = [
     {"name": "原神", "bsn": "36730"},
-    {"name": "鳴潮", "bsn": "74934"}
+    # {"name": "絕區零", "bsn": "74860"},
+    {"name": "鳴潮", "bsn": "74934"},
+    # {"name": "戰雙帕彌什", "bsn": "37463"}
 ]
 
 BLOCK_KEYWORDS = ["版規", "置頂", "公告", "刪除", "兌換", "邀請" ,"序號", "好友", "網頁活動", "互助", "健檢", "隊伍配置", "大佬集中串", "贈送", "祖傳聖遺物", "新手須知"]
@@ -174,7 +176,7 @@ def crawl_article_pages(base_meta, list_page_num):
                     if page_numbers:
                         total_content_pages_val = max(page_numbers)
 
-                # --- 內文抓取 (修正版) ---
+                # --- 內文抓取 ---
                 all_text_blocks = soup.select('.c-article__content, .reply-content__article .comment_content')
                 content_list = []
                 
@@ -186,7 +188,7 @@ def crawl_article_pages(base_meta, list_page_num):
                     # 2. 取得純文字並去除前後空白
                     raw_text = block.text.strip()
                     
-                    # 🔥【修改點 1】如果內容為空 (例如只有貼圖或純空白)，直接跳過
+                    # 如果內容為空 (例如只有貼圖或純空白)，直接跳過
                     if not raw_text:
                         continue 
 
@@ -194,7 +196,6 @@ def crawl_article_pages(base_meta, list_page_num):
                     classes = block.get('class', [])
                     
                     if 'c-article__content' in classes:
-                        # 🔥【修改點 2】修正稱呼為「蓋樓者」
                         prefix = "【蓋樓者】"
                     else:
                         prefix = "【回覆者】"
@@ -250,7 +251,6 @@ def crawl_article_pages(base_meta, list_page_num):
                 time.sleep(2)
 
         else:
-            # 這是與 for 對齊的 else，代表「break 沒有被觸發 (3次都失敗了)」
             print(f" ❌ 第 {current_floor_page} 頁重試 3 次皆失敗，放棄該頁。")
         
         current_floor_page += 1

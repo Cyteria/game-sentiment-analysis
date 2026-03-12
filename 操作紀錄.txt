@@ -1,6 +1,6 @@
 // 爬蟲 & 分析 打包指令
 
-docker build -f Dockerfile.job -t gcr.io/games-sentiment-analysis/game-pipeline-job .
+docker build --platform linux/amd64 -f Dockerfile.job -t gcr.io/games-sentiment-analysis/game-pipeline-job .
 docker push gcr.io/games-sentiment-analysis/game-pipeline-job
 
 

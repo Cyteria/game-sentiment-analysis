@@ -40,9 +40,9 @@ COOKIES = {"ckBH_over18": "1"}
 
 TARGET_BOARDS = [
     {"name": "原神", "bsn": "36730"},
-    # {"name": "絕區零", "bsn": "74860"},
+    {"name": "絕區零", "bsn": "74860"},
     {"name": "鳴潮", "bsn": "74934"},
-    # {"name": "戰雙帕彌什", "bsn": "37463"}
+    {"name": "戰雙帕彌什", "bsn": "37463"}
 ]
 
 BLOCK_KEYWORDS = ["版規", "置頂", "公告", "刪除", "兌換", "邀請" ,"序號", "好友", "網頁活動", "互助", "健檢", "隊伍配置", "大佬集中串", "贈送", "祖傳聖遺物", "新手須知"]
@@ -176,40 +176,42 @@ def crawl_article_pages(base_meta, list_page_num):
                     if page_numbers:
                         total_content_pages_val = max(page_numbers)
 
-                # --- 內文抓取 ---
+                # --- 內文抓取與雜訊過濾 ---
                 all_text_blocks = soup.select('.c-article__content, .reply-content__article .comment_content')
                 content_list = []
-                
+                total_words_on_this_page = 0  # 統計這頁到底有多少「有效文字」
+
                 for block in all_text_blocks:
                     # 1. 移除勇者卡片
                     for gamercard in block.select('.article_gamercard'):
                         gamercard.decompose()
                     
-                    # 2. 取得純文字並去除前後空白
-                    raw_text = block.text.strip()
+                    # 2. 強力清除零寬度空白與 HTML 空白
+                    raw_text = block.get_text().replace('\xa0', ' ').replace('\u200b', '').strip()
                     
-                    # 如果內容為空 (例如只有貼圖或純空白)，直接跳過
-                    if not raw_text:
+                    # 3. 如果單樓完全沒實質文字(只有圖或空白)，直接跳過這樓
+                    if not raw_text:  
                         continue 
 
-                    # 3. 判斷身份
+                    # 4. 判斷身份並存入清單
                     classes = block.get('class', [])
+                    prefix = "【蓋樓者】" if 'c-article__content' in classes else "【回覆者】"
                     
-                    if 'c-article__content' in classes:
-                        prefix = "【蓋樓者】"
-                    else:
-                        prefix = "【回覆者】"
-
-                    # 4. 組合字串
                     content_list.append(f"{prefix}：{raw_text}")
-                
-                # 5. 合併並清洗
+                    total_words_on_this_page += len(raw_text)
+
+                # --- 攔截「整頁無意義」的情況 (迴圈控制修正) ---
+                if total_words_on_this_page < 10: 
+                    print(f" [⚠️ 總內容過短 ({total_words_on_this_page}字)，放棄存入本頁]")
+                    
+                    if current_floor_page == 1:
+                        return # 第一頁就沒料，整串放棄
+                    
+                    break # ✅ 正確做法：跳出 Retry 迴圈，讓外層 while 接手處理下一頁
+
+                # --- 執行合併與清洗 ---
                 full_content = "\n\n".join(content_list)
                 full_content = clean_text_content(full_content)
-
-                if len(full_content) < 10:
-                    print(f" [⚠️ 內容過短，跳過]")
-                    break
 
                 # --- 數值抓取 ---
                 gp_count, bp_count = 0, 0
@@ -221,6 +223,7 @@ def crawl_article_pages(base_meta, list_page_num):
                         if gp_tag: gp_count = safe_int(gp_tag.text)
                         if bp_tag: bp_count = safe_int(bp_tag.text)
 
+                # --- UUID 生成與資料庫寫入 ---
                 unique_key_str = f"{base_meta['bsn']}_{base_meta['sna']}_{current_floor_page}"
                 fixed_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, unique_key_str))
 
@@ -244,7 +247,8 @@ def crawl_article_pages(base_meta, list_page_num):
                 save_to_db(post_data)
                 print(" [完成]")
                 time.sleep(random.uniform(1, 2))
-                break 
+                
+                break # ✅ 成功存入，跳出 Retry 迴圈
 
             except Exception as e:
                 print(f" [錯誤: {e}]")
@@ -253,6 +257,7 @@ def crawl_article_pages(base_meta, list_page_num):
         else:
             print(f" ❌ 第 {current_floor_page} 頁重試 3 次皆失敗，放棄該頁。")
         
+        # 外層迴圈的頁數推進
         current_floor_page += 1
 
 def boards_crawler(board_name, bsn, list_page):

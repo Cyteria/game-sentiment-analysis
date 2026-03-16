@@ -41,7 +41,7 @@ st.set_page_config(page_title="遊戲輿情分析戰情室", page_icon="🎮", l
 # ==========================================
 # 2. 資料獲取與預處理
 # ==========================================
-@st.cache_data(ttl=300) # 加入快取，每 5 分鐘重抓一次，提升網頁載入速度
+@st.cache_data(ttl=300) # 每 5 分鐘重抓一次
 def get_data():
     try:
         conn = pymysql.connect(**db_config)
@@ -77,6 +77,13 @@ def parse_json(x):
     try: return json.loads(x)
     except: return {}
 df['parsed_result'] = df['analysis_result'].apply(parse_json)
+
+# 新增：為圓餅圖準備的情緒分類標籤
+def categorize_sentiment(score):
+    if score >= 1: return "正面 (Positive)"
+    elif score <= -1: return "負面 (Negative)"
+    else: return "中立 (Neutral)"
+df['sentiment_category'] = df['sentiment_score'].apply(categorize_sentiment)
 
 # ==========================================
 # 3. 側邊欄進階過濾器
@@ -117,26 +124,24 @@ if not filtered_df.empty:
         res = row['parsed_result']
         if res and 'reviews' in res:
             for review in res['reviews']:
-                # 收集關鍵字
                 kws = review.get('keywords', [])
                 if isinstance(kws, str): kws = re.split(r'[、,，\s]+', kws)
                 all_keywords.extend([k for k in kws if len(k.strip()) > 1])
                 
-                # 收集角色好感度
                 target_char = review.get('target_character')
                 sentiment = float(review.get('sentiment_score', 0))
                 if target_char and str(target_char).strip().lower() not in ['null', 'none', '']:
                     all_characters.append({"character": str(target_char).strip(), "sentiment": sentiment})
                 
-                # 收集議題分類
                 topic_data.append(review.get('main_category', '其他'))
 
-stop_words = {"，", "。", "！", "？", "、", " ", "", "遊戲", "玩家", "一個", "這個", "正面", "負面",}
+# 擴充了停用詞庫，讓字雲更準確
+stop_words = {"，", "。", "！", "？", "、", " ", "", "遊戲", "玩家", "一個", "這個", "正面", "負面", "因為", "所以", "然後", "覺得"}
 clean_keywords = [kw for kw in all_keywords if kw not in stop_words]
 keyword_counts = Counter(clean_keywords).most_common(50)
 
 # ==========================================
-# 4. 關鍵指標 KPIs
+# 4. 關鍵指標 KPIs 與 炎上預警系統
 # ==========================================
 col1, col2, col3 = st.columns(3)
 total_posts = len(filtered_df)
@@ -156,6 +161,15 @@ with col2:
 with col3:
     st.metric("熱門關鍵字 (Top Trend)", top_keyword, f"提及 {kw_count} 次", delta_color="off")
 
+# 🚨 炎上預警系統：根據平均分數動態跳出提示
+if total_posts > 0:
+    if avg_score <= -1.0:
+        board_text = f"【{selected_board}】" if selected_board != "全部" else "整體"
+        st.error(f"🚨 **炎上預警**：{board_text}目前篩選範圍內的平均情緒降至 **{avg_score:.2f}**，社群氛圍偏向負面，請密切關注可能引發公關危機的議題！")
+    elif avg_score >= 2.0:
+        board_text = f"【{selected_board}】" if selected_board != "全部" else "整體"
+        st.success(f"🎉 **好評發燒**：{board_text}目前篩選範圍內的平均情緒高達 **{avg_score:.2f}**，玩家反響熱烈，建議可趁勢加大行銷推廣！")
+
 st.divider()
 
 if filtered_df.empty:
@@ -163,26 +177,51 @@ if filtered_df.empty:
     st.stop()
 
 # ==========================================
-# 5. 戰情室展示 (1)：輿情聲量與情緒雙軸圖
+# 5. 戰情室展示 (1)：輿情聲量與情緒分佈
 # ==========================================
-st.subheader("📊 戰情室展示 (1)：總覽與趨勢追蹤")
-daily_trend = filtered_df.groupby('date').agg(
-    文章量=('uuid', 'count'), 平均情緒=('sentiment_score', 'mean')
-).reset_index()
+st.subheader("📊 戰情室展示 (1)：聲量趨勢與情緒分佈")
 
-base = alt.Chart(daily_trend).encode(x=alt.X('date:T', title='日期'))
+# 將畫面切為左右兩塊：左邊放折線圖(較寬)，右邊放圓餅圖(較窄)
+col_trend, col_pie = st.columns([2, 1])
 
-bar = base.mark_bar(opacity=0.4, color='#6baed6', size=30).encode(
-    y=alt.Y('文章量:Q', title='文章聲量 (Volume)', axis=alt.Axis(titleColor='#6baed6'))
-)
+with col_trend:
+    st.write("**聲量與平均情緒雙軸趨勢**")
+    daily_trend = filtered_df.groupby('date').agg(
+        文章量=('uuid', 'count'), 平均情緒=('sentiment_score', 'mean')
+    ).reset_index()
 
-line = base.mark_line(color='#d62728', strokeWidth=3, point=alt.OverlayMarkDef(size=100, color='#d62728')).encode(
-    y=alt.Y('平均情緒:Q', title='情緒分數 (Score)', scale=alt.Scale(domain=[-5, 5]), axis=alt.Axis(titleColor='#d62728')),
-    tooltip=['date:T', '文章量:Q', alt.Tooltip('平均情緒:Q', format='.2f')]
-)
+    base = alt.Chart(daily_trend).encode(x=alt.X('date:T', title='日期'))
 
-combo_chart = alt.layer(bar, line).resolve_scale(y='independent').properties(height=400)
-st.altair_chart(combo_chart, use_container_width=True)
+    bar = base.mark_bar(opacity=0.4, color='#6baed6', size=25).encode(
+        y=alt.Y('文章量:Q', title='文章聲量 (Volume)', axis=alt.Axis(titleColor='#6baed6'))
+    )
+
+    line = base.mark_line(color='#d62728', strokeWidth=3, point=alt.OverlayMarkDef(size=100, color='#d62728')).encode(
+        y=alt.Y('平均情緒:Q', title='情緒分數 (Score)', scale=alt.Scale(domain=[-5, 5]), axis=alt.Axis(titleColor='#d62728')),
+        tooltip=['date:T', '文章量:Q', alt.Tooltip('平均情緒:Q', format='.2f')]
+    )
+
+    combo_chart = alt.layer(bar, line).resolve_scale(y='independent').properties(height=350)
+    st.altair_chart(combo_chart, use_container_width=True)
+
+with col_pie:
+    st.write("**情緒健康度佔比**")
+    sentiment_counts = filtered_df['sentiment_category'].value_counts().reset_index()
+    sentiment_counts.columns = ['情緒', '數量']
+    
+    # 設定正面(綠)、中立(藍/灰)、負面(紅)的顏色
+    color_scale = alt.Scale(
+        domain=['正面 (Positive)', '中立 (Neutral)', '負面 (Negative)'],
+        range=['#2ca02c', '#a6b1bd', '#d62728'] 
+    )
+    
+    donut_chart = alt.Chart(sentiment_counts).mark_arc(innerRadius=60).encode(
+        theta=alt.Theta(field="數量", type="quantitative"),
+        color=alt.Color(field="情緒", type="nominal", scale=color_scale, legend=alt.Legend(orient="bottom", title="")),
+        tooltip=['情緒', '數量']
+    ).properties(height=350)
+    
+    st.altair_chart(donut_chart, use_container_width=True)
 
 st.divider()
 
@@ -217,12 +256,12 @@ with col_s1:
     st.write("**📊 議題分類佔比 (Topic Share)**")
     if topic_data:
         topic_df = pd.DataFrame(Counter(topic_data).items(), columns=['議題', '數量'])
-        donut = alt.Chart(topic_df).mark_arc(innerRadius=60).encode(
+        donut2 = alt.Chart(topic_df).mark_arc(innerRadius=60).encode(
             theta=alt.Theta(field="數量", type="quantitative"),
             color=alt.Color(field="議題", type="nominal", scale=alt.Scale(scheme='category20')),
             tooltip=['議題', '數量']
         ).properties(height=250)
-        st.altair_chart(donut, use_container_width=True)
+        st.altair_chart(donut2, use_container_width=True)
     else:
         st.info("無議題分類資料")
 

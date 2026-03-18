@@ -2,6 +2,7 @@
 venv/
 env/
 .env
+操作紀錄.txt
 
 # 忽略 Python 快取檔
 __pycache__/

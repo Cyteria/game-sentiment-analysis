@@ -30,9 +30,9 @@
 
 * **前端與視覺化 (Frontend & Visualization):** Streamlit
 * **後端與資料處理 (Backend & Data Processing):** Python, Pandas
-* **自然語言處理 (NLP):** LLM API (情緒與意圖分析)、Jieba (斷詞與停用詞過濾)
+* **自然語言處理 (NLP):** LLM API (情緒與意圖分析)
 * **資料獲取 (Data Pipeline):** Python Web Scraping (Requests / BeautifulSoup)
-* **資料庫 (Database):** 關聯式 / 非關聯式資料庫 (MySQL / MongoDB)
+* **資料庫 (Database):** 關聯式 (MySQL)
 * **部署與維運 (Deployment & DevOps):** Docker, Google Cloud Platform (GCP Cloud Run)
 
 ---

@@ -186,10 +186,10 @@ def crawl_article_pages(base_meta, list_page_num):
                     for gamercard in block.select('.article_gamercard'):
                         gamercard.decompose()
                     
-                    # 2. 強力清除零寬度空白與 HTML 空白
+                    # 2. 清除零寬度空白與 HTML 空白
                     raw_text = block.get_text().replace('\xa0', ' ').replace('\u200b', '').strip()
                     
-                    # 3. 如果單樓完全沒實質文字(只有圖或空白)，直接跳過這樓
+                    # 3. 如果單樓完全沒實質文字(只有圖或空白)，直接跳過
                     if not raw_text:  
                         continue 
 
@@ -200,14 +200,14 @@ def crawl_article_pages(base_meta, list_page_num):
                     content_list.append(f"{prefix}：{raw_text}")
                     total_words_on_this_page += len(raw_text)
 
-                # --- 攔截「整頁無意義」的情況 (迴圈控制修正) ---
+                # --- 攔截「整頁空白」 ---
                 if total_words_on_this_page < 10: 
                     print(f" [⚠️ 總內容過短 ({total_words_on_this_page}字)，放棄存入本頁]")
                     
                     if current_floor_page == 1:
                         return # 第一頁就沒料，整串放棄
                     
-                    break # ✅ 正確做法：跳出 Retry 迴圈，讓外層 while 接手處理下一頁
+                    break
 
                 # --- 執行合併與清洗 ---
                 full_content = "\n\n".join(content_list)

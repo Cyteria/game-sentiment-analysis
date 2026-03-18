@@ -101,6 +101,19 @@ date_range = st.sidebar.date_input("日期範圍", [min_date, max_date], min_val
 sentiment_range = st.sidebar.slider("情緒分數過濾", -5.0, 5.0, (-5.0, 5.0), 0.5)
 search_keyword = st.sidebar.text_input("關鍵字搜尋", placeholder="例如：卡頓、福利...")
 
+# ✅ 新增：AI 議題分類篩選 (提取所有可用的主分類)
+available_topics = set()
+for res in df['parsed_result']:
+    if res and isinstance(res, dict) and 'reviews' in res:
+        for review in res['reviews']:
+            category = review.get('main_category')
+            # 確保有值，且字串長度大於 1，才會被加入選單
+            if category and len(str(category).strip()) > 1:
+                available_topics.add(str(category).strip())
+
+topics_list = ["全部"] + sorted(list(available_topics))
+selected_topic = st.sidebar.selectbox("🎯 議題分類篩選 (AI 判讀)", topics_list)
+
 # 套用過濾
 filtered_df = df.copy()
 if selected_board != "全部": 
@@ -108,9 +121,17 @@ if selected_board != "全部":
 if len(date_range) == 2: 
     filtered_df = filtered_df[(filtered_df['date'] >= date_range[0]) & (filtered_df['date'] <= date_range[1])]
 filtered_df = filtered_df[(filtered_df['sentiment_score'] >= sentiment_range[0]) & (filtered_df['sentiment_score'] <= sentiment_range[1])]
+
 if search_keyword:
     mask = (filtered_df['title'].str.contains(search_keyword, case=False, na=False) | filtered_df['content'].str.contains(search_keyword, case=False, na=False))
     filtered_df = filtered_df[mask]
+
+# ✅ 新增：套用 AI 議題分類的過濾邏輯
+if selected_topic != "全部":
+    mask_topic = filtered_df['parsed_result'].apply(
+        lambda res: any(r.get('main_category') == selected_topic for r in res.get('reviews', [])) if isinstance(res, dict) else False
+    )
+    filtered_df = filtered_df[mask_topic]
 
 # ==========================================
 # 特徵萃取 (一次性迴圈，提升效能)
@@ -124,19 +145,118 @@ if not filtered_df.empty:
         res = row['parsed_result']
         if res and 'reviews' in res:
             for review in res['reviews']:
-                kws = review.get('keywords', [])
-                if isinstance(kws, str): kws = re.split(r'[、,，\s]+', kws)
-                all_keywords.extend([k for k in kws if len(k.strip()) > 1])
+                # 取得原本的關鍵字
+                raw_kws = review.get('keywords', [])
+                
+                # 如果是字串，先進行分割
+                if isinstance(raw_kws, str): raw_kws = re.split(r'[、,，\s]+', raw_kws)
+                
+                # 統一轉換為小寫並去除空白
+                normalized_kws = [k.lower().strip() for k in raw_kws]
+                
+                # 只保留長度大於 1 的乾淨關鍵字
+                all_keywords.extend([k for k in normalized_kws if len(k) > 1])
+                
+                # 定義「非角色」的黑名單
+                char_blacklist = ['絕區零', '原神', '鳴潮', '戰雙', '帕彌什ˇ', '崩壞', '遊戲', '官方', '策劃', '客服', '公司', '米哈遊', '庫洛']
                 
                 target_char = review.get('target_character')
                 sentiment = float(review.get('sentiment_score', 0))
-                if target_char and str(target_char).strip().lower() not in ['null', 'none', '']:
-                    all_characters.append({"character": str(target_char).strip(), "sentiment": sentiment})
+
+                # ✅ 新增：角色別名與同義詞對照表 (Alias Mapping)
+                char_aliases = {
+                    # ================= 絕區零 (ZZZ) =================
+                    "雅": "星見雅",
+                    "鯊魚妹": "艾蓮",
+                    "鯊魚": "艾蓮",
+                    "狼哥": "萊卡恩",
+                    "老鼠": "簡",
+                    "簡杜": "簡",
+                    "狡兔屋老大": "妮可",
+                    "社長": "珂蕾妲",
+                    "警官": "朱鳶",
+                    "朱隊": "朱鳶",
+                    "漢堡妹": "安比",
+                    "女僕長": "麗娜",
+                    "貓又": "貓宮又奈",
+
+                    # ================= 鳴潮 (Wuthering Waves) =================
+                    "暗主": "漂泊者",
+                    "衍主": "漂泊者",
+                    "光主": "漂泊者",
+                    "卡子哥": "卡卡羅",
+                    "綠龍": "忌炎",
+                    "將軍": "忌炎",
+                    "牢相": "相里要",
+                    "計算機": "相里要",
+                    "汐寶": "今汐",
+                    "離老師": "長離",
+                    "離神": "長離",
+                    "吟霖媽媽": "吟霖",
+                    "粉毛": "安可",
+                    "散華": "散華",
+                    "小護士": "維里奈",
+                    "烏龜": "淵武",
+
+                    # ================= 原神 (Genshin Impact) =================
+                    "萬葉": "楓原萬葉",
+                    "葉天帝": "楓原萬葉",
+                    "快樂風男": "楓原萬葉",
+                    "帝君": "鍾離",
+                    "岩王爺": "鍾離",
+                    "雷神": "雷電將軍",
+                    "影": "雷電將軍",
+                    "煮飯婆": "雷電將軍",
+                    "水神": "芙寧娜",
+                    "芙芙": "芙寧娜",
+                    "水龍": "那維萊特",
+                    "水龍王": "那維萊特",
+                    "龍王": "那維萊特",
+                    "那維": "那維萊特",
+                    "散兵": "流浪者",
+                    "崩帽": "流浪者",
+                    "公子": "達達利亞",
+                    "達達鴨": "達達利亞",
+                    "夜天后": "夜蘭",
+                    "堂主": "胡桃",
+                    "黃毛": "旅行者",
+                    "熒": "旅行者",
+                    "空": "旅行者",
+                    "凌華": "神里綾華",
+                    "神子": "八重神子",
+
+                    # ================= 戰雙帕彌什 (PGR) =================
+                    # 戰雙玩家通常以「機體名稱」或「特徵」來稱呼角色
+                    "白毛": "露西亞", 
+                    "深紅": "露西亞",
+                    "深紅之淵": "露西亞",
+                    "囚影": "露西亞",
+                    "鴉羽": "露西亞",
+                    "深痕": "比安卡",
+                    "真理": "比安卡",
+                    "魔女": "比安卡",
+                    "超刻": "里",
+                    "亂數": "里",
+                    "火神": "里",
+                    "極晝": "麗芙",
+                    "仰光": "麗芙",
+                    "流光": "麗芙",
+                    "緋耀": "薇拉",
+                    "狗狗": "薇拉",
+                    "幻奏": "賽琳娜",
+                    "榮光": "庫洛姆",
+                    "萬事": "萬事",
+                }
+
+                if target_char:
+                    char_name = str(target_char).strip()
+                    if char_name.lower() not in ['null', 'none', ''] and char_name not in char_blacklist:
+                        all_characters.append({"character": char_name, "sentiment": sentiment})
                 
                 topic_data.append(review.get('main_category', '其他'))
 
 # 擴充了停用詞庫，讓字雲更準確
-stop_words = {"，", "。", "！", "？", "、", " ", "", "遊戲", "玩家", "一個", "這個", "正面", "負面", "因為", "所以", "然後", "覺得"}
+stop_words = {"，", "。", "！", "？", "、", " ", "", "遊戲", "玩家", "一個", "這個", "正面", "負面", "因為", "所以", "然後", "覺得", "不滿", "腳寫的", "中立", "滿意", "證據"}
 clean_keywords = [kw for kw in all_keywords if kw not in stop_words]
 keyword_counts = Counter(clean_keywords).most_common(50)
 
@@ -163,12 +283,22 @@ with col3:
 
 # 🚨 炎上預警系統：根據平均分數動態跳出提示
 if total_posts > 0:
-    if avg_score <= -1.0:
+    if avg_score <= -3.0:
         board_text = f"【{selected_board}】" if selected_board != "全部" else "整體"
         st.error(f"🚨 **炎上預警**：{board_text}目前篩選範圍內的平均情緒降至 **{avg_score:.2f}**，社群氛圍偏向負面，請密切關注可能引發公關危機的議題！")
-    elif avg_score >= 2.0:
+    elif avg_score >= 3.0:
         board_text = f"【{selected_board}】" if selected_board != "全部" else "整體"
         st.success(f"🎉 **好評發燒**：{board_text}目前篩選範圍內的平均情緒高達 **{avg_score:.2f}**，玩家反響熱烈，建議可趁勢加大行銷推廣！")
+    
+    with st.expander("ℹ️ AI 情緒評分標準指南 (Scoring Rubric)"):
+        st.markdown("""
+        為了確保情緒分數具備客觀的商業參考價值，系統賦予了 LLM 嚴格的評分錨點 (Anchor Points)：
+        * **🟢 +4 ~ +5 (極度狂熱/死忠)**：玩家表達強烈喜愛、極力推坑，甚至表示願意為此大量付費（例如：「這神作吧」、「這婆爆我還不抽爆」、「官方真的是我大哥」）。
+        * **🟢 +1 ~ +3 (正面滿意)**：遊戲體驗良好，對更新、活動或角色表示讚賞（例如：「這次改版還不錯」、「新角色的美術很香」）。
+        * **⚪ 0 (中立客觀)**：單純的情報分享、遊戲機制探討、或是無明顯情緒的新手提問（例如：「請問這關怎麼打」、「明天維修時間確認」）。
+        * **🔴 -1 ~ -3 (負面抱怨)**：對遊戲設計、機率或小 Bug 感到不滿，但尚未到達退坑程度（例如：「這掉落率真的感人」、「連線又斷了，煩死」）。
+        * **🔴 -4 ~ -5 (極度憤怒/公關危機)**：強烈的退坑宣言、要求退款、對營運團隊的嚴重指責或號召抵制（例如：「垃圾吃相有夠難看」、「已檢舉退款，準備解除安裝」）。
+        """)
 
 st.divider()
 
@@ -181,7 +311,6 @@ if filtered_df.empty:
 # ==========================================
 st.subheader("📊 戰情室展示 (1)：聲量趨勢與情緒分佈")
 
-# 將畫面切為左右兩塊：左邊放折線圖(較寬)，右邊放圓餅圖(較窄)
 col_trend, col_pie = st.columns([2, 1])
 
 with col_trend:
@@ -193,7 +322,7 @@ with col_trend:
     base = alt.Chart(daily_trend).encode(x=alt.X('date:T', title='日期'))
 
     bar = base.mark_bar(opacity=0.4, color='#6baed6', size=25).encode(
-        y=alt.Y('文章量:Q', title='文章聲量 (Volume)', axis=alt.Axis(titleColor='#6baed6'))
+        y=alt.Y('文章量:Q', title='討論總筆數 (留言+主文)', axis=alt.Axis(titleColor='#6baed6'))
     )
 
     line = base.mark_line(color='#d62728', strokeWidth=3, point=alt.OverlayMarkDef(size=100, color='#d62728')).encode(
@@ -209,7 +338,6 @@ with col_pie:
     sentiment_counts = filtered_df['sentiment_category'].value_counts().reset_index()
     sentiment_counts.columns = ['情緒', '數量']
     
-    # 設定正面(綠)、中立(藍/灰)、負面(紅)的顏色
     color_scale = alt.Scale(
         domain=['正面 (Positive)', '中立 (Neutral)', '負面 (Negative)'],
         range=['#2ca02c', '#a6b1bd', '#d62728'] 
@@ -285,24 +413,29 @@ with col_s2:
 st.divider()
 
 # ==========================================
-# 7. 戰情室展示 (3)：競品對比分析
+# 7. 戰情室展示 (3)：競品社群情緒穩定度對比
 # ==========================================
 if selected_board == "全部" and len(all_boards) > 1:
-    st.subheader("⚔️ 戰情室展示 (3)：競品對比分析")
+    st.subheader("⚔️ 戰情室展示 (3)：競品社群情緒穩定度對比")
     
-    st.write("**跨遊戲聲量趨勢 (Volume Comparison)**")
-    comp_daily = filtered_df.groupby(['date', 'board_name']).size().reset_index(name='文章量')
+    st.markdown("""
+    > 💡 **分析說明**：
+    > 考量不同遊戲的「改版時程」與「活動週期」不一致，直接對比單日聲量容易產生偏差。
+    > 因此，本區塊屏除時間軸，直接以**「社群情緒穩定度 (Community Volatility)」**進行宏觀的品牌體質健檢。
+    > **看圖秘訣**：盒鬚圖的區塊越寬，代表該遊戲的玩家評價越兩極（容易引發爭議）；區塊越窄，代表玩家評價越趨於一致。
+    """)
     
-    comp_line = alt.Chart(comp_daily).mark_line(point=True, strokeWidth=3).encode(
-        x=alt.X('date:T', title='日期'),
-        y=alt.Y('文章量:Q', title='討論文章數'),
-        color=alt.Color('board_name:N', title='遊戲看板', scale=alt.Scale(scheme='set1')),
-        tooltip=['date:T', 'board_name:N', '文章量:Q']
-    ).properties(height=400).interactive()
+    st.write("**📦 社群情緒分數分佈圖**")
     
-    st.altair_chart(comp_line, use_container_width=True)
+    box_chart = alt.Chart(filtered_df).mark_boxplot(extent='min-max', size=40).encode(
+        x=alt.X('sentiment_score:Q', title='情緒分數分佈', scale=alt.Scale(domain=[-5, 5])),
+        y=alt.Y('board_name:N', title='', sort=alt.EncodingSortField(field="sentiment_score", op="mean", order="descending")),
+        color=alt.Color('board_name:N', legend=None, scale=alt.Scale(scheme='set1')),
+        tooltip=['board_name:N']
+    ).properties(height=400)
     
-    st.info("💡 **AI 商業洞察**：透過上方趨勢圖可觀察特定遊戲的改版日或炎上事件，是否造成同類競品聲量下降，驗證玩家注意力的『資源排擠效應』。")
+    st.altair_chart(box_chart, use_container_width=True)
+        
     st.divider()
 
 # ==========================================
